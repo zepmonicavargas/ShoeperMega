@@ -4,57 +4,63 @@
 #include <MFRC522.h>
 
 #define SS_PIN 53
-#define RST_PIN 5
+#define RST_PIN 49
 MFRC522 rfid(SS_PIN, RST_PIN);
+
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
 #define coinSlot 47
 #define uvc 35
 #define blower 31
 #define fog 37
+#define ozone 33
 #define pump 3
 #define led 2
+#define Motor1 23
+#define Motor2 25
+#define Motor3 27
+#define air 29
+#define fogpower 4
 
-
-int IN3 = 41;
-int IN4 = 39;
-int ENB = 10;
-int IN1 = 45;
-int IN2 = 43;
-int ENA = 26;
+int IN3 = 41; // exhaust
+int IN4 = 39; // exhaust
 
 int coinSlotStatus;
 int pulse = 0;
 void disinfect();
 
 void setup() {
-  Serial1.begin(9600);
+  Serial.begin(115200);
   SPI.begin();
   rfid.PCD_Init();
-  Serial1.println("Place your RFID card near the scanner...");
-  pinMode(IN1, OUTPUT);
-  pinMode(IN2, OUTPUT);
-  pinMode(ENA, OUTPUT);
+  delay(100);
+  Serial.println("Place your RFID card near the scanner...");
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
-  pinMode(ENB, OUTPUT);
-  // Start with the motor stopped
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-  analogWrite(ENA, 0); // Speed 0 (stopped)
   pinMode(coinSlot, INPUT_PULLUP);
   pinMode(uvc, OUTPUT);
   pinMode(fog, OUTPUT);
   pinMode(pump, OUTPUT);
+  pinMode(ozone, OUTPUT);
   pinMode(blower, OUTPUT);
   pinMode(led, OUTPUT);
-  pinMode(ENA, OUTPUT);
-  analogWrite(ENA, 0);  // Ensure it starts with 0 (off)
-  
+  pinMode(Motor1, OUTPUT);
+  pinMode(Motor2, OUTPUT);
+  pinMode(Motor3, OUTPUT);
+  pinMode(air, OUTPUT);
+  pinMode(fogpower, OUTPUT);
+
   digitalWrite(uvc, HIGH);  // Turn off the LED
   digitalWrite(fog, LOW); // Turn on the LED
-  digitalWrite(blower,LOW);
-  digitalWrite(pump, HIGH);
+  digitalWrite(blower, HIGH);
+  digitalWrite(Motor1, HIGH);
+  digitalWrite(Motor2, HIGH);
+  digitalWrite(Motor3, HIGH);
+  digitalWrite(fogpower, HIGH); //
+  
 }
+unsigned long lastCoinPulseTime = 0;
+const unsigned long coinDebounceDelay = 30; 
 unsigned long previousMillis = 0;
 const long interval = 200; // Check RFID every 200 ms
 bool cashMode = false;  // Flag to keep track of cash input
@@ -62,102 +68,165 @@ bool cashMode = false;  // Flag to keep track of cash input
 void loop() {
   digitalWrite(led, HIGH);
   // Check for serial input
-  if (Serial1.available() > 0) {
-    String input = Serial1.readString(); // Read the input string
+  if (Serial.available() > 0) {
+    String input = Serial.readString(); // Read the input string
     input.trim(); // Remove any leading or trailing whitespace
 
     // Activate cash mode when input is "cash"
     if (input == "cash") {
       cashMode = true;
-      digitalWrite(led, LOW);
     }
 
     // Activate RFID mode when input is "rfid"
     else if (input == "rfid") {
-      cashMode = false;  // Stop cash mode
+      cashMode = false;
       digitalWrite(led, LOW);
+      // Serial.println("yes");
 
-    // Stay in this loop until RFID tag is detected
-    while (true) {
-      if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-        // Print the RFID serial number directly
-        for (byte i = 0; i < rfid.uid.size; i++) {
-          Serial1.print(rfid.uid.uidByte[i], HEX);
-          if (i < rfid.uid.size - 1) {
-            Serial1.print(" ");  // Print a space between bytes
+      rfid.PCD_Init();        // Initialize
+      rfid.PCD_Reset();       // Reset the MFRC522
+      rfid.PCD_Init();        // Initialize again after reset
+      rfid.PCD_AntennaOn();   // Turn on the antenna
+      
+      // Stay in this loop until an RFID tag is detected or "back" is received
+      while (true) {
+        delay(10);
+        
+        // Check if RFID tag is present
+        if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+          Serial.print("<"); // Start marker
+          for (byte i = 0; i < rfid.uid.size; i++) {
+              // Optional: add a leading zero for single digit hex numbers
+              if (rfid.uid.uidByte[i] < 0x10) Serial.print("0");
+              Serial.print(rfid.uid.uidByte[i], HEX);
+              if (i < rfid.uid.size - 1) {
+                  Serial.print(" ");
+              }
+          }
+          Serial.println(">"); // End marker
+
+          rfid.PICC_HaltA(); // End communication with card
+          break;          // Exit the RFID waiting loop after tag is detected
+        }
+        
+        // Check for serial input to break out of RFID waiting mode
+        if (Serial.available() > 0) {
+          String backInput = Serial.readString();
+          backInput.trim();
+          if (backInput == "back") {
+            // Optionally, provide feedback like Serial.println("Returning to main loop.");
+            break;  // Exit the RFID waiting loop
           }
         }
-        Serial1.println();  // New line after the complete UID
-
-        // End communication with card
-        rfid.PICC_HaltA();
-        rfid.PCD_StopCrypto1();  // Stop encryption on PCD
         
-        delay(1000);  // Small delay to prevent double scan
-
-        // Wait until card is removed
-        while (rfid.PICC_IsNewCardPresent() || rfid.PICC_ReadCardSerial()) {
-          delay(100);
-        }
-
-        break;  // Exit loop after successful detection and removal
+        delay(100); // Slight delay to reduce CPU usage
       }
     }
-  }
-
+    
     if (input == "start"){
         disinfect();
+        //return;
       }
   }
 
   // Cash mode handling
-  if (cashMode) {
+  while (cashMode) {
     digitalWrite(led, LOW);
     coinSlotStatus = digitalRead(coinSlot);
 
-    if (coinSlotStatus == 0) {
-      pulse += 1;
-      Serial1.println("1");  // Print "1" for each pulse received
-      delay(30);  // Debounce delay
+    if (coinSlotStatus == LOW) { // Assuming the pulse pulls the line LOW (0)
+        if (millis() - lastCoinPulseTime > coinDebounceDelay) {
+          pulse += 1;
+          Serial.println("1");  // Print "1" for each pulse received
+          lastCoinPulseTime = millis();
+        }
+      
 
-      if (pulse == 20) {
-        delay(5000);
+
+      if (pulse == 40) {
+        //delay(5000);
         pulse = 0;
+        cashMode = false;
         return;
       }
     }
+
+    // Listen for Serial input to exit cash mode
+    if (Serial.available() > 0) {
+      String backInput = Serial.readString();
+      backInput.trim();
+      if (backInput == "back") {
+        //Serial.println("Exiting cash mode...");
+        cashMode = false;
+        return;  // Exit cashMode loop
+      }
+    }
+
+    //delay(50); // Optional delay to reduce CPU usage
   }
 }
 
 void disinfect(){
+  //pump on start and uvc
+    digitalWrite(uvc, LOW);
+    digitalWrite(pump, HIGH); 
+    delay(5000);
 
+  //motors on 
+    digitalWrite(pump, LOW);
+
+    //digitalWrite(uvc, LOW); 
+    //digitalWrite(fog, HIGH); 
+    digitalWrite(Motor1, LOW);
+    digitalWrite(Motor2, LOW);
+    digitalWrite(Motor3, LOW);
+    delay(30000); 
+
+  //motors off ozone on fog power on
+    digitalWrite(fogpower, LOW);
+    //digitalWrite(uvc, HIGH);  
+    //digitalWrite(fog, LOW); 
+    digitalWrite(Motor1, HIGH);
+    digitalWrite(Motor2, HIGH);
+    digitalWrite(Motor3, HIGH);
+    digitalWrite(ozone, HIGH);
+    digitalWrite(air, HIGH);  
+    delay(300000);
+ 
+  //ozone off drying on and exhaust
     
-    digitalWrite(uvc, LOW); // Turn on the LED
-    digitalWrite(fog, HIGH); // Turn on the LED
-    digitalWrite(pump, HIGH); // Turn on the LED
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
-    analogWrite(ENA, 255);
-    delay(5000);             // Keep the LED on for 5 seconds
-    digitalWrite(uvc, HIGH);  // Turn off the LED
+    digitalWrite(ozone, LOW);
+    //digitalWrite(air, LOW);
 
-    digitalWrite(fog, LOW); // Turn on the LED
-    digitalWrite(pump, LOW); // Turn on the LED
-    digitalWrite(IN1, LOW);
-    digitalWrite(IN2, LOW);
-    analogWrite(ENA, 0);
-    digitalWrite(led, HIGH); // Turn on the LED
-    digitalWrite(blower, HIGH); // Turn on the LED
-    digitalWrite(IN3, HIGH);
-    digitalWrite(IN4, LOW);
-    analogWrite(ENB, 255);
-    delay(5000);             // Keep the LED on for 5 seconds
+    digitalWrite(led, HIGH); 
+    digitalWrite(blower, LOW); 
+    digitalWrite(IN3, HIGH); // exhaust
+    digitalWrite(IN4, LOW); // exhaust
+    delay(180000);            
 
-    digitalWrite(led, LOW);  // Turn off the LED
-    digitalWrite(blower, LOW); // Turn on the LED
-    digitalWrite(IN3, LOW);
-    digitalWrite(IN4, LOW);
-    analogWrite(ENB, 0);
-    Serial1.println("finish");
+  // fog on 30 seconds of drying and exhaust
 
+    digitalWrite(air, LOW);
+    digitalWrite(fog, HIGH);
+    digitalWrite(blower, HIGH); 
+    digitalWrite(IN3, LOW); // exhaust
+    digitalWrite(IN4, LOW); // exhaust
+    //digitalWrite(uvc, HIGH); 
+    delay(60000);
+    
+  // exhaust on and blower on final drying off fog and power
+
+    digitalWrite(fog, LOW);
+    digitalWrite(fogpower, HIGH);
+    digitalWrite(blower, LOW); 
+    digitalWrite(IN3, HIGH); // exhaust
+    digitalWrite(IN4, LOW); // exhaust
+    delay(30000);
+
+  // all done off all components
+    digitalWrite(uvc,HIGH);
+    digitalWrite(blower, HIGH); 
+    digitalWrite(IN3, LOW); // exhaust
+    digitalWrite(IN4, LOW); // exhaust
+    Serial.println("finish");
 }
