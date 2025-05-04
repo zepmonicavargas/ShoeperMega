@@ -94,15 +94,17 @@ bool cashMode = false;  // Flag to keep track of cash input
 void loop() {
   digitalWrite(led, HIGH);
   
-  /*int state = digitalRead(floatswitch);
+  int state = digitalRead(floatswitch);
 
   if (state == HIGH && wasHigh) {
-    Serial.println("Chemical Low");
+    Serial.println("chemlow");
     sendSMS("Chemical Low detected!");
     wasHigh = false;         // update the state so it won't print again
-  } else if (state == LOW) {
+  } else if (state == LOW && !wasHigh) {
+    Serial.println("OK");
     wasHigh = true;          // reset when the float switch goes back to HIGH
-  }*/
+  }
+  
   // Check for serial input
   if (Serial.available() > 0) {
     String input = Serial.readString(); // Read the input string
