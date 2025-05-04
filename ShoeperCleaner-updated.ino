@@ -203,25 +203,20 @@ void loop() {
 }
 
 void disinfect(){
-  //pump on start and uvc
+  //pump on start and uvc motors on 
     digitalWrite(uvc, LOW);
     digitalWrite(pump, HIGH); 
-    digitalWrite(fogpower, LOW);
-    delay(5000);
-
-  //motors on 
-    digitalWrite(pump, LOW);
-
-    //digitalWrite(uvc, LOW); 
-    //digitalWrite(fog, HIGH); 
     digitalWrite(Motor1, LOW);
     digitalWrite(Motor2, LOW);
     digitalWrite(Motor3, LOW);
-    delay(30000); 
+    
+    delay(5000);
+
+  // pump off
+    digitalWrite(pump, LOW);
+    delay(25000); 
 
   //motors off ozone on
-    //digitalWrite(uvc, HIGH);  
-    //digitalWrite(fog, LOW); 
     digitalWrite(Motor1, HIGH);
     digitalWrite(Motor2, HIGH);
     digitalWrite(Motor3, HIGH);
@@ -232,25 +227,23 @@ void disinfect(){
   //ozone off drying on and exhaust
 
     digitalWrite(ozone, LOW);
-    //digitalWrite(air, LOW);
-
+    digitalWrite(fogpower, LOW);
     digitalWrite(led, HIGH); 
     digitalWrite(blower, LOW); 
     digitalWrite(IN3, HIGH); // exhaust
     digitalWrite(IN4, LOW); // exhaust
     delay(180000);            
 
-  // fog on 30 seconds of drying and exhaust
+  // fog on 30 seconds; off drying and exhaust
 
     digitalWrite(air, LOW);
     digitalWrite(fog, HIGH);
     digitalWrite(blower, HIGH); 
     digitalWrite(IN3, LOW); // exhaust
     digitalWrite(IN4, LOW); // exhaust
-    //digitalWrite(uvc, HIGH); 
     delay(60000);
     
-  // exhaust on and blower on final drying off fog and power
+  // exhaust on and blower on final drying; off fog and power
 
     digitalWrite(fog, LOW);
     digitalWrite(fogpower, HIGH);
