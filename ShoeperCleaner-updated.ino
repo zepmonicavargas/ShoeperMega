@@ -23,7 +23,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define Motor3 27
 #define air 29
 #define fogpower 4
-#define floatswitch 5
+#define floatswitch 6
 
 int IN3 = 41; // exhaust
 int IN4 = 39; // exhaust
@@ -57,7 +57,7 @@ void setup() {
   pinMode(Motor3, OUTPUT);
   pinMode(air, OUTPUT);
   pinMode(fogpower, OUTPUT);
-  pinMode(floatswitch,INPUT);
+  pinMode(floatswitch,INPUT_PULLUP);
 
   digitalWrite(uvc, HIGH);  // Turn off the LED
   digitalWrite(fog, LOW); // Turn on the LED
@@ -65,7 +65,8 @@ void setup() {
   digitalWrite(Motor1, HIGH);
   digitalWrite(Motor2, HIGH);
   digitalWrite(Motor3, HIGH);
-  digitalWrite(fogpower, HIGH); //
+  digitalWrite(fogpower, LOW); //
+  digitalWrite(pump, HIGH); 
 
   delay(1000);
   sim800l.println("AT");
@@ -91,19 +92,13 @@ unsigned long previousMillis = 0;
 const long interval = 200; // Check RFID every 200 ms
 bool cashMode = false;  // Flag to keep track of cash input
 
+int lastStableState = HIGH;  // Assume float is HIGH at start
+int lastReading = HIGH;
+unsigned long lastDebounceTime = 0;
+const unsigned long debounceDelay = 50;
+
 void loop() {
   digitalWrite(led, HIGH);
-  
-  int state = digitalRead(floatswitch);
-
-  if (state == HIGH && wasHigh) {
-    Serial.println("chemlow");
-    sendSMS("Chemical Low detected!");
-    wasHigh = false;         // update the state so it won't print again
-  } else if (state == LOW && !wasHigh) {
-    Serial.println("OK");
-    wasHigh = true;          // reset when the float switch goes back to HIGH
-  }
   
   // Check for serial input
   if (Serial.available() > 0) {
@@ -163,9 +158,52 @@ void loop() {
     
     if (input == "start"){
         disinfect();
+        //Serial.println("finish");
         //return;
       }
-  }
+
+   else if (input == "level") {
+     delay(1000);
+      while (true) {
+        int currentReading = digitalRead(floatswitch);
+
+        if (currentReading != lastReading) {
+          lastDebounceTime = millis();  // reset debounce timer
+          lastReading = currentReading;
+        }
+
+        // If the reading has stayed stable for debounceDelay
+        if ((millis() - lastDebounceTime) > debounceDelay) {
+          if (currentReading != lastStableState) {
+            lastStableState = currentReading;
+
+            if (lastStableState == HIGH) {
+              Serial.println("chemlow");
+              sendSMS("Chemical Low detected!");
+            } else {
+              Serial.println("OK");
+            }
+
+            delay(500); // Short delay to ensure clean transmission
+          }
+        }
+
+        // Check for exit command from Serial
+        if (Serial.available()) {
+          String command = Serial.readStringUntil('\n');
+          command.trim();
+          if (command == "back") {
+            break;
+          }
+        }
+
+        delay(10); // Small delay to avoid busy loop
+      }
+    }
+
+
+
+
 
   // Cash mode handling
   while (cashMode) {
@@ -203,11 +241,12 @@ void loop() {
     //delay(50); // Optional delay to reduce CPU usage
   }
 }
+}
 
 void disinfect(){
   //pump on start and uvc motors on 
     digitalWrite(uvc, LOW);
-    digitalWrite(pump, HIGH); 
+    digitalWrite(pump, LOW); 
     digitalWrite(Motor1, LOW);
     digitalWrite(Motor2, LOW);
     digitalWrite(Motor3, LOW);
@@ -215,7 +254,7 @@ void disinfect(){
     delay(5000);
 
   // pump off
-    digitalWrite(pump, LOW);
+    digitalWrite(pump, HIGH);
     delay(25000); 
 
   //motors off ozone on
@@ -229,7 +268,7 @@ void disinfect(){
   //ozone off drying on and exhaust
 
     digitalWrite(ozone, LOW);
-    digitalWrite(fogpower, LOW);
+    digitalWrite(fogpower, HIGH);
     digitalWrite(led, HIGH); 
     digitalWrite(blower, LOW); 
     digitalWrite(IN3, HIGH); // exhaust
@@ -248,7 +287,7 @@ void disinfect(){
   // exhaust on and blower on final drying; off fog and power
 
     digitalWrite(fog, LOW);
-    digitalWrite(fogpower, HIGH);
+    digitalWrite(fogpower, LOW);
     digitalWrite(blower, LOW); 
     digitalWrite(IN3, HIGH); // exhaust
     digitalWrite(IN4, LOW); // exhaust
